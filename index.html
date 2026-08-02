@@ -1,0 +1,978 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Duvido Que Saiba!</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        
+        /* Preservando as animações que antes dependiam do plugin tailwindcss-animate */
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideInFromBottom { from { transform: translateY(2rem); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        @keyframes slideInFromLeft { from { transform: translateX(-2rem); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes slideInFromRight { from { transform: translateX(2rem); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        @keyframes zoomIn { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+        .fade-in { animation: fadeIn var(--tw-duration, 500ms) ease-out forwards; }
+        .slide-in-from-bottom-8 { animation: slideInFromBottom var(--tw-duration, 500ms) ease-out forwards; }
+        .slide-in-from-bottom-4 { animation: slideInFromBottom var(--tw-duration, 500ms) ease-out forwards; }
+        .slide-in-from-left-8 { animation: slideInFromLeft var(--tw-duration, 500ms) ease-out forwards; }
+        .slide-in-from-right-8 { animation: slideInFromRight var(--tw-duration, 500ms) ease-out forwards; }
+        .zoom-in { animation: zoomIn var(--tw-duration, 500ms) ease-out forwards; }
+        .animate-in { opacity: 0; }
+        
+        .duration-300 { --tw-duration: 300ms; }
+        .duration-500 { --tw-duration: 500ms; }
+        .duration-700 { --tw-duration: 700ms; }
+        .duration-1000 { --tw-duration: 1000ms; }
+
+        /* Estilos de Scrollbar customizados */
+        .scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+        .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+        .scrollbar-thin::-webkit-scrollbar-thumb { background-color: rgba(255, 255, 255, 0.1); border-radius: 20px; }
+    </style>
+</head>
+<body class="bg-gray-950 font-sans selection:bg-indigo-500/30 relative overflow-x-hidden min-h-screen text-gray-200">
+
+    <!-- Background Decorativo (Gradients & Orbs) -->
+    <div class="fixed inset-0 pointer-events-none z-0">
+        <div class="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] bg-indigo-900/30 rounded-full blur-[120px] mix-blend-screen"></div>
+        <div class="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] bg-purple-900/20 rounded-full blur-[120px] mix-blend-screen"></div>
+    </div>
+
+    <!-- Root Container -->
+    <div id="root" class="relative z-10 w-full h-full"></div>
+
+    <script>
+        const APP_NAME = "DUVIDO QUE SAIBA!";
+        const API_KEY = ""; // Injetado pelo ambiente
+        const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${API_KEY}`;
+        const RANKING_API_URL = "SUA_URL_DO_WEB_APP_AQUI"; 
+        const RANKING_SECRET_KEY = "duvidoquesaiba_secreto_2024";
+
+        const SUGGESTED_THEMES = [
+            "Dragon Ball", "Naruto", "One Piece", "Pokémon", "Cartoon Network", 
+            "Fox Kids", "Cinema", "Filmes", "Músicas", "Rock", "Economia", 
+            "Ciência", "Matemática", "Física", "Química", "Biologia", "História", 
+            "Geografia", "Astronomia", "Tecnologia", "Programação", "Anos 80", 
+            "Anos 90", "Novelas", "Séries", "Marvel", "DC", "Jogos", "Nintendo", 
+            "PlayStation", "Xbox", "Mitologia", "RPG"
+        ];
+
+        const DIFFICULTIES = ["Muito Fácil", "Fácil", "Normal", "Difícil", "Especialista"];
+
+        const WELCOME_TEXT = `Bem-vindo ao ${APP_NAME}\n\nAqui você escolhe o assunto e desafia seus próprios conhecimentos. Explore desde temas amplos como filmes, músicas, ciência e história até universos específicos como Dragon Ball, Naruto, Pokémon, Cartoon Network, séries dos anos 80, economia, programação e muito mais. Quer testar o quanto sabe ou estudar de forma divertida? Escolha qualquer tema, enfrente perguntas cada vez mais desafiadoras, acumule experiência, evolua seu nível e descubra até onde sua inteligência pode chegar.`;
+
+        function loadSavedPlayer() {
+            const saved = localStorage.getItem('duvidoQueSaiba_player');
+            if (saved) {
+                try {
+                    return JSON.parse(saved);
+                } catch (e) {
+                    console.error("Erro ao ler localStorage", e);
+                }
+            }
+            return {
+                name: "",
+                level: 1,
+                xp: 0,
+                totalXp: 0,
+                correct: 0,
+                incorrect: 0,
+                streak: 0,
+                maxStreak: 0,
+                gamesPlayed: 0,
+                timePlayed: 0,
+                questionHistory: [] 
+            };
+        }
+
+        const state = {
+            screen: 'home',
+            gameConfig: { theme: "", difficulty: "Normal" },
+            player: loadSavedPlayer(),
+            home: { nameInput: "", themeInput: "", difficulty: "Normal" },
+            game: { questionData: null, loading: true, error: null, selectedOpt: null, isAnswered: false, levelUpData: null },
+            ranking: { data: [], loading: true }
+        };
+
+        let rankingInterval = null;
+        let sessionStartTime = null;
+
+        function savePlayer() {
+            if (state.player.name) {
+                localStorage.setItem('duvidoQueSaiba_player', JSON.stringify(state.player));
+            }
+        }
+
+        window.showAlert = (msg) => {
+            const modal = document.createElement('div');
+            modal.className = "fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-300";
+            modal.innerHTML = `
+                <div class="bg-gray-900 border border-white/10 p-6 rounded-2xl max-w-sm w-full text-center shadow-2xl">
+                    <p class="text-white font-medium mb-6">${msg}</p>
+                    <button onclick="this.parentElement.parentElement.remove()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2 rounded-xl font-medium w-full transition-colors">OK</button>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        };
+
+        class XPEngine {
+            static getRequiredXpForLevel(level) {
+                return Math.floor(50 * Math.pow(level, 1.35));
+            }
+
+            static getXpGain(level, difficulty) {
+                const diffMultiplier = DIFFICULTIES.indexOf(difficulty) + 1; 
+                const baseGain = 1 + ((level - 1) * 0.5); 
+                return Math.floor(baseGain * (1 + (diffMultiplier * 0.2)));
+            }
+        }
+
+        class AIService {
+            static async generateQuestion(theme, difficulty, historyContext = []) {
+                const prompt = `
+                    Você é o motor de um jogo de trivia. Você NUNCA conversa, NUNCA explica, NUNCA faz comentários.
+                    Gere UMA pergunta sobre o tema: "${theme}". Dificuldade: ${difficulty}.
+                    
+                    HISTÓRICO DE FATOS JÁ COBRADOS DO JOGADOR (FINGERPRINTS SEMÂNTICOS):
+                    ${historyContext.length > 0 ? historyContext.map(f => `- ${f}`).join('\n') : 'Nenhum histórico. Primeira pergunta.'}
+                    
+                    REGRA ABSOLUTA DE INEDITISMO:
+                    O sistema verifica originalidade por SEMÂNTICA. Uma pergunta NUNCA pode avaliar o mesmo conhecimento do histórico.
+                    A repetição é PROIBIDA mesmo que:
+                    - A ordem das palavras seja diferente.
+                    - Existam sinônimos.
+                    - As alternativas sejam diferentes.
+                    - A resposta correta esteja em outra posição.
+                    
+                    AUTO-VALIDAÇÃO INTERNA (Execute antes de responder):
+                    1. Esta pergunta já apareceu literalmente no histórico?
+                    2. Ela mede o mesmo conhecimento de outra pergunta do histórico?
+                    3. A resposta correta é a mesma de outra pergunta equivalente?
+                    4. Apenas reescrevi uma pergunta antiga?
+                    Se a resposta for "SIM" para qualquer uma, DESCARTE E CRIE OUTRA. Repita esse processo até encontrar um fato totalmente inédito.
+                    
+                    Regras de formatação:
+                    - Exatamente 4 alternativas (A, B, C, D).
+                    - Apenas 1 resposta correta.
+                    - A explicação deve focar apenas no fato que torna a resposta correta. MÁXIMO ABSOLUTO de 150 caracteres.
+                    
+                    Retorne APENAS um JSON válido neste formato (sem marcações markdown):
+                    {
+                        "question": "Texto da pergunta inédita",
+                        "options": ["Opção A", "Opção B", "Opção C", "Opção D"],
+                        "correctIndex": 0,
+                        "explanation": "Explicação curta de no máximo 150 caracteres.",
+                        "fingerprint": "Assinatura do fato central cobrado (ex: Derrota de Freeza por Goku em Namekusei). Máximo 10 palavras."
+                    }
+                `;
+
+                const payload = {
+                    contents: [{ parts: [{ text: prompt }] }],
+                    generationConfig: {
+                        responseMimeType: "application/json"
+                    }
+                };
+
+                let retries = 5;
+                let delay = 1000;
+                while (retries > 0) {
+                    try {
+                        const response = await fetch(API_URL, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+
+                        if (!response.ok) throw new Error("API Error");
+                        
+                        const data = await response.json();
+                        const textResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                        
+                        if (!textResponse) throw new Error("Empty Response");
+                        
+                        return JSON.parse(textResponse);
+                    } catch (err) {
+                        retries--;
+                        if (retries === 0) throw new Error("Falha ao contatar a IA após múltiplas tentativas. Tente novamente.");
+                        await new Promise(r => setTimeout(r, delay));
+                        delay *= 2;
+                    }
+                }
+            }
+        }
+
+        class StorageService {
+            static save(playerData) {
+                try {
+                    const jsonStr = JSON.stringify(playerData);
+                    const encoded = btoa(encodeURIComponent(jsonStr)).split('').reverse().join('');
+                    const blob = new Blob([encoded], { type: "text/plain;charset=utf-8" });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = `duvido_que_saiba_save_${new Date().getTime()}.txt`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                } catch (e) {
+                    showAlert("Erro ao salvar o progresso.");
+                }
+            }
+
+            static async load(file) {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        try {
+                            const content = e.target.result;
+                            const decoded = decodeURIComponent(atob(content.split('').reverse().join('')));
+                            resolve(JSON.parse(decoded));
+                        } catch (err) {
+                            reject("Arquivo de save inválido ou corrompido.");
+                        }
+                    };
+                    reader.onerror = () => reject("Erro ao ler o arquivo.");
+                    reader.readAsText(file);
+                });
+            }
+        }
+
+        class RankingService {
+            static async savePlayer(player) {
+                if (!RANKING_API_URL || RANKING_API_URL === "SUA_URL_DO_WEB_APP_AQUI") return;
+                try {
+                    const payload = {
+                        secret: RANKING_SECRET_KEY,
+                        name: player.name,
+                        score: player.totalXp,
+                        correct: player.correct,
+                        incorrect: player.incorrect,
+                        time: player.timePlayed || 0
+                    };
+                    await fetch(RANKING_API_URL, {
+                        method: "POST",
+                        mode: "no-cors",
+                        headers: { "Content-Type": "text/plain" },
+                        body: JSON.stringify(payload)
+                    });
+                } catch (error) {
+                    console.error("Erro ao enviar dados para o ranking:", error);
+                }
+            }
+
+            static async getRanking() {
+                if (!RANKING_API_URL || RANKING_API_URL === "SUA_URL_DO_WEB_APP_AQUI") return [];
+                try {
+                    const response = await fetch(RANKING_API_URL);
+                    if (!response.ok) throw new Error("Erro na rede");
+                    const data = await response.json();
+                    return data;
+                } catch (error) {
+                    console.error("Erro ao buscar ranking:", error);
+                    return [];
+                }
+            }
+        }
+
+        window.setScreen = (newScreen) => {
+            if (rankingInterval) {
+                clearInterval(rankingInterval);
+                rankingInterval = null;
+            }
+            state.screen = newScreen;
+            
+            if (newScreen === 'ranking') {
+                window.fetchRankingData();
+                rankingInterval = setInterval(window.fetchRankingData, 30000);
+            }
+            render();
+        };
+
+        window.setTheme = (theme) => {
+            state.home.themeInput = theme;
+            const el = document.getElementById('themeInput');
+            if (el) el.value = theme;
+        };
+
+        window.setDifficulty = (diff) => {
+            state.home.difficulty = diff;
+            render();
+        };
+
+        window.handleStart = () => {
+            const name = state.home.nameInput.trim();
+            if (!name) return;
+            state.player.name = name;
+            savePlayer();
+            
+            state.gameConfig.theme = state.home.themeInput.trim() || "Conhecimentos Gerais";
+            state.gameConfig.difficulty = state.home.difficulty;
+            
+            startNewGameSession();
+        };
+
+        window.handleLoad = async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            try {
+                const data = await StorageService.load(file);
+                if (data && data.level) {
+                    state.player = data;
+                    state.home.nameInput = data.name;
+                    savePlayer();
+                    showAlert("Progresso carregado com sucesso!");
+                    render();
+                }
+            } catch (err) {
+                showAlert(err);
+            }
+            e.target.value = null; 
+        };
+
+        async function startNewGameSession() {
+            state.screen = 'game';
+            state.game.loading = true;
+            state.game.error = null;
+            state.game.questionData = null;
+            state.game.isAnswered = false;
+            state.game.selectedOpt = null;
+            state.game.levelUpData = null;
+            sessionStartTime = Date.now();
+            render();
+            await fetchQuestion();
+        }
+
+        window.fetchQuestion = async () => {
+            state.game.loading = true;
+            state.game.error = null;
+            state.game.selectedOpt = null;
+            state.game.isAnswered = false;
+            state.game.levelUpData = null;
+            render();
+            
+            try {
+                const data = await AIService.generateQuestion(state.gameConfig.theme, state.gameConfig.difficulty, state.player.questionHistory || []);
+                state.game.questionData = data;
+            } catch (err) {
+                state.game.error = err.message;
+            } finally {
+                state.game.loading = false;
+                render();
+            }
+        };
+
+        window.handleAnswer = (index) => {
+            if (state.game.isAnswered) return;
+            
+            state.game.selectedOpt = index;
+            state.game.isAnswered = true;
+
+            const isCorrect = index === state.game.questionData.correctIndex;
+            
+            if (!state.player.questionHistory) {
+                state.player.questionHistory = [];
+            }
+            
+            if (state.game.questionData.fingerprint) {
+                state.player.questionHistory.push(state.game.questionData.fingerprint);
+            }
+            
+            state.player.gamesPlayed += 1;
+            
+            if (isCorrect) {
+                state.player.correct += 1;
+                state.player.streak += 1;
+                if (state.player.streak > state.player.maxStreak) {
+                    state.player.maxStreak = state.player.streak;
+                }
+                
+                const xpGain = XPEngine.getXpGain(state.player.level, state.gameConfig.difficulty);
+                state.player.xp += xpGain;
+                state.player.totalXp += xpGain;
+                
+                let required = XPEngine.getRequiredXpForLevel(state.player.level);
+                if (state.player.xp >= required) {
+                    state.game.levelUpData = { oldLevel: state.player.level, newLevel: state.player.level + 1 };
+                    state.player.xp = state.player.xp - required; 
+                    state.player.level += 1;
+                }
+            } else {
+                state.player.incorrect += 1;
+                state.player.streak = 0;
+            }
+            
+            savePlayer();
+            render();
+        };
+
+        window.handleQuitGame = () => {
+            if (sessionStartTime) {
+                const sessionTimeInSeconds = Math.floor((Date.now() - sessionStartTime) / 1000);
+                state.player.timePlayed = (state.player.timePlayed || 0) + sessionTimeInSeconds;
+                savePlayer();
+                RankingService.savePlayer(state.player);
+            }
+            window.setScreen('home');
+        };
+
+        window.fetchRankingData = async () => {
+            state.ranking.loading = true;
+            render();
+            state.ranking.data = await RankingService.getRanking();
+            state.ranking.loading = false;
+            render();
+        };
+
+        window.clearLevelUp = () => {
+            state.game.levelUpData = null;
+            render();
+        };
+
+        const GlassPanel = (children, className = "") => `
+            <div class="bg-gray-900/60 backdrop-blur-xl border border-white/10 shadow-2xl rounded-2xl ${className}">
+                ${children}
+            </div>
+        `;
+
+        const Button = (children, onClick, variant = 'primary', className = "", disabled = false, icon = null) => {
+            const base = "relative overflow-hidden font-semibold rounded-xl transition-all duration-300 flex items-center justify-center gap-2 active:scale-95";
+            const variants = {
+                primary: "bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white shadow-lg shadow-indigo-500/30",
+                secondary: "bg-white/5 hover:bg-white/10 text-white border border-white/10",
+                success: "bg-gradient-to-r from-emerald-500 to-green-600 text-white shadow-lg shadow-green-500/30",
+                danger: "bg-gradient-to-r from-red-500 to-rose-600 text-white shadow-lg shadow-red-500/30"
+            };
+            const iconHtml = icon ? `<i data-lucide="${icon}" class="w-[18px] h-[18px]"></i>` : '';
+            return `
+                <button 
+                    onclick="${onClick}" 
+                    ${disabled ? 'disabled' : ''}
+                    class="${base} ${variants[variant]} ${disabled ? 'opacity-50 cursor-not-allowed' : ''} px-6 py-3 ${className}"
+                >
+                    ${iconHtml}
+                    ${children}
+                </button>
+            `;
+        };
+
+        const XPBar = (xp, requiredXp, animated = true) => {
+            const percentage = Math.min(100, Math.max(0, (xp / requiredXp) * 100));
+            return `
+                <div class="w-full relative group">
+                    <div class="flex justify-between text-xs text-gray-400 mb-1 font-medium">
+                        <span>XP Atual</span>
+                        <span>${Math.floor(xp)} / ${requiredXp}</span>
+                    </div>
+                    <div class="h-4 bg-gray-800 rounded-full overflow-hidden border border-white/5 shadow-inner">
+                        <div 
+                            class="h-full bg-gradient-to-r from-green-400 to-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.5)] relative ${animated ? 'transition-all duration-1000 ease-out' : ''}"
+                            style="width: ${percentage}%"
+                        >
+                            <div class="absolute top-0 left-0 right-0 h-1/2 bg-white/20 rounded-full"></div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        };
+
+        const formatTime = (secs) => {
+            if (!secs) return "00:00";
+            const h = Math.floor(secs / 3600);
+            const m = Math.floor((secs % 3600) / 60).toString().padStart(2, '0');
+            const s = (secs % 60).toString().padStart(2, '0');
+            return h > 0 ? `${h}:${m}:${s}` : `${m}:${s}`;
+        };
+
+        const renderHome = () => {
+            const p = state.player;
+            if (!state.home.nameInput && p.name) state.home.nameInput = p.name;
+
+            return `
+                <div class="flex flex-col items-center justify-center min-h-screen p-6 max-w-5xl mx-auto w-full gap-8 animate-in fade-in duration-700">
+                    <div class="w-full flex justify-between items-center bg-gray-900/40 p-4 rounded-2xl border border-white/5 flex-wrap gap-4">
+                        <div class="flex items-center gap-4">
+                            <div class="bg-indigo-500/20 p-3 rounded-xl border border-indigo-500/30">
+                                <i data-lucide="user" class="text-indigo-400 w-6 h-6"></i>
+                            </div>
+                            <div>
+                                <h3 class="font-bold text-white text-lg">${p.name || "Jogador(a)"}</h3>
+                                <p class="text-indigo-400 text-sm font-medium">Nível ${p.level}</p>
+                            </div>
+                        </div>
+                        <div class="flex flex-wrap gap-2">
+                            ${Button("Ranking", "window.setScreen('ranking')", "secondary", "!py-2 !px-4 text-sm", false, "globe")}
+                            ${Button("Perfil", "window.setScreen('profile')", "secondary", "!py-2 !px-4 text-sm", false, "user")}
+                            ${Button("Conquistas", "window.setScreen('achievements')", "secondary", "!py-2 !px-4 text-sm", false, "trophy")}
+                        </div>
+                    </div>
+
+                    <div class="text-center space-y-4 mb-4">
+                        <h1 class="text-5xl md:text-7xl font-extrabold tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 via-purple-400 to-pink-400 drop-shadow-[0_0_25px_rgba(129,140,248,0.2)]">
+                            ${APP_NAME}
+                        </h1>
+                        <p class="text-gray-400 text-lg md:text-xl font-light tracking-wide max-w-2xl mx-auto">
+                            O Quiz infinito gerado por Inteligência Artificial.
+                        </p>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-8 w-full">
+                        ${GlassPanel(`
+                            <div class="mb-6 flex items-center gap-3">
+                                <div class="p-2 bg-purple-500/20 rounded-lg">
+                                    <i data-lucide="brain" class="text-purple-400 w-6 h-6"></i>
+                                </div>
+                                <h2 class="text-xl font-bold text-white">Sobre o Jogo</h2>
+                            </div>
+                            <p class="text-gray-300 leading-relaxed whitespace-pre-line text-[15px]">
+                                ${WELCOME_TEXT}
+                            </p>
+                        `, "p-8 flex flex-col justify-center")}
+
+                        ${GlassPanel(`
+                            <div class="space-y-1">
+                                <label class="text-sm font-medium text-gray-400 ml-1">Seu Nome</label>
+                                <input 
+                                    type="text" 
+                                    value="${state.home.nameInput}"
+                                    oninput="state.home.nameInput = this.value; state.player.name = this.value; savePlayer();"
+                                    placeholder="Digite seu nome..."
+                                    class="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500 transition-colors"
+                                />
+                            </div>
+
+                            <div class="space-y-2">
+                                <label class="text-sm font-medium text-gray-400 ml-1">Qual assunto deseja jogar?</label>
+                                <input 
+                                    type="text" 
+                                    id="themeInput"
+                                    value="${state.home.themeInput}"
+                                    oninput="state.home.themeInput = this.value"
+                                    placeholder="Ex: Dragon Ball, Economia, Mitologia..."
+                                    class="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-indigo-500 transition-colors text-lg"
+                                />
+                                
+                                <div class="flex flex-wrap gap-2 mt-3 max-h-32 overflow-y-auto scrollbar-thin scrollbar-thumb-white/10 p-1">
+                                    ${SUGGESTED_THEMES.map(t => `
+                                        <button
+                                            onclick="window.setTheme('${t}')"
+                                            class="text-xs bg-white/5 hover:bg-white/15 border border-white/5 px-3 py-1.5 rounded-full text-gray-300 transition-all active:scale-95"
+                                        >
+                                            ${t}
+                                        </button>
+                                    `).join('')}
+                                </div>
+                            </div>
+
+                            <div class="space-y-2">
+                                <label class="text-sm font-medium text-gray-400 ml-1">Dificuldade</label>
+                                <div class="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                                    ${DIFFICULTIES.map(diff => `
+                                        <button
+                                            onclick="window.setDifficulty('${diff}')"
+                                            class="text-xs py-2 rounded-lg font-medium transition-all ${
+                                                state.home.difficulty === diff 
+                                                ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/25' 
+                                                : 'bg-white/5 text-gray-400 hover:bg-white/10 border border-white/5'
+                                            }"
+                                        >
+                                            ${diff}
+                                        </button>
+                                    `).join('')}
+                                </div>
+                            </div>
+
+                            ${Button("INICIAR DESAFIO", "window.handleStart()", "primary", "w-full mt-2 py-4 text-lg", false, "play")}
+
+                            <div class="flex items-center gap-4 mt-2 pt-4 border-t border-white/5">
+                                ${Button("Salvar", "StorageService.save(state.player)", "secondary", "flex-1 text-sm", false, "save")}
+                                ${Button("Carregar", "document.getElementById('fileInput').click()", "secondary", "flex-1 text-sm", false, "upload")}
+                                <input 
+                                    type="file" 
+                                    id="fileInput" 
+                                    class="hidden" 
+                                    accept=".txt"
+                                    onchange="window.handleLoad(event)"
+                                />
+                            </div>
+                        `, "p-8 flex flex-col gap-6")}
+                    </div>
+                </div>
+            `;
+        };
+
+        const renderGame = () => {
+            const p = state.player;
+            const theme = state.gameConfig.theme;
+            const difficulty = state.gameConfig.difficulty;
+            const loading = state.game.loading;
+            const error = state.game.error;
+            const qData = state.game.questionData;
+            const isAnswered = state.game.isAnswered;
+            const selectedOpt = state.game.selectedOpt;
+            const levelUpData = state.game.levelUpData;
+
+            let contentHTML = '';
+
+            if (loading) {
+                contentHTML = `
+                    <div class="flex flex-col items-center justify-center py-20 text-indigo-400 space-y-4">
+                        <div class="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                        <p class="font-medium animate-pulse">A IA está formulando um desafio...</p>
+                    </div>
+                `;
+            } else if (error) {
+                contentHTML = `
+                    <div class="text-center py-20">
+                        <i data-lucide="x-circle" class="text-red-500 mx-auto mb-4 w-12 h-12"></i>
+                        <h3 class="text-xl text-white mb-2">Ops, ocorreu um erro.</h3>
+                        <p class="text-gray-400 mb-6">${error}</p>
+                        ${Button("Tentar Novamente", "window.fetchQuestion()", "primary", "", false, "play")}
+                    </div>
+                `;
+            } else if (qData) {
+                let optionsHTML = qData.options.map((opt, idx) => {
+                    const isSelected = selectedOpt === idx;
+                    const isCorrect = qData.correctIndex === idx;
+                    
+                    let btnStyle = "bg-white/5 border-white/10 hover:bg-white/10 text-gray-200";
+                    
+                    if (isAnswered) {
+                        if (isCorrect) {
+                            btnStyle = "bg-green-500/20 border-green-500/50 text-green-300 ring-2 ring-green-500/50 shadow-[0_0_15px_rgba(34,197,94,0.2)]";
+                        } else if (isSelected && !isCorrect) {
+                            btnStyle = "bg-red-500/20 border-red-500/50 text-red-300";
+                        } else {
+                            btnStyle = "bg-black/20 border-white/5 text-gray-600 opacity-50"; 
+                        }
+                    }
+
+                    return `
+                        <button
+                            onclick="window.handleAnswer(${idx})"
+                            ${isAnswered ? 'disabled' : ''}
+                            class="w-full text-left p-5 rounded-xl border-2 transition-all duration-300 text-lg flex items-center justify-between group ${btnStyle} ${!isAnswered ? 'active:scale-[0.98]' : ''}"
+                        >
+                            <span class="flex items-center gap-4">
+                                <span class="flex items-center justify-center w-8 h-8 rounded-lg bg-black/30 font-bold text-sm text-gray-400 group-hover:text-white transition-colors">
+                                    ${String.fromCharCode(65 + idx)}
+                                </span>
+                                ${opt}
+                            </span>
+                            ${isAnswered && isCorrect ? '<i data-lucide="check-circle-2" class="text-green-500 w-6 h-6"></i>' : ''}
+                            ${isAnswered && isSelected && !isCorrect ? '<i data-lucide="x-circle" class="text-red-500 w-6 h-6"></i>' : ''}
+                        </button>
+                    `;
+                }).join('');
+
+                let resultHTML = '';
+                if (isAnswered) {
+                    let levelUpHTML = '';
+                    if (levelUpData) {
+                        levelUpHTML = `
+                            <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in zoom-in duration-500" onclick="window.clearLevelUp()">
+                                <div class="bg-gradient-to-br from-indigo-900 to-purple-900 p-12 rounded-3xl border border-indigo-400 shadow-[0_0_50px_rgba(99,102,241,0.5)] text-center transform scale-110">
+                                    <i data-lucide="star" class="text-yellow-400 mx-auto mb-4 animate-bounce w-16 h-16 fill-current"></i>
+                                    <h1 class="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 to-amber-500 mb-2">LEVEL UP!</h1>
+                                    <p class="text-2xl text-white font-medium">Você alcançou o Nível ${levelUpData.newLevel}</p>
+                                    <p class="text-indigo-200 mt-6 text-sm">Clique em qualquer lugar para continuar</p>
+                                </div>
+                            </div>
+                        `;
+                    }
+
+                    let answerResult = selectedOpt === qData.correctIndex ? `
+                        <div class="flex items-center gap-2 text-green-400 font-bold text-2xl mb-4">
+                            <i data-lucide="check-circle-2" class="w-8 h-8"></i> Resposta Correta!
+                        </div>
+                        <p class="text-gray-300 font-medium max-w-2xl bg-black/30 p-4 rounded-xl border border-white/5">
+                            ${qData.explanation}
+                        </p>
+                    ` : `
+                        <div class="flex items-center gap-2 text-red-500 font-bold text-2xl mb-4">
+                            <i data-lucide="x-circle" class="w-8 h-8"></i> Que pena, você errou!
+                        </div>
+                        <p class="text-gray-300 font-medium max-w-2xl bg-black/30 p-4 rounded-xl border border-white/5">
+                            <span class="block text-green-400 font-semibold mb-1">A resposta correta era a letra ${String.fromCharCode(65 + qData.correctIndex)}.</span>
+                            ${qData.explanation}
+                        </p>
+                    `;
+
+                    resultHTML = `
+                        <div class="mt-8 pt-8 border-t border-white/10 animate-in slide-in-from-bottom-4 flex flex-col items-center text-center">
+                            ${levelUpHTML}
+                            ${answerResult}
+                            ${Button("PRÓXIMA PERGUNTA", "window.fetchQuestion()", "primary", "mt-8 w-full md:w-auto px-12 py-4 text-lg", false, "chevron-right")}
+                        </div>
+                    `;
+                }
+
+                contentHTML = `
+                    <div class="animate-in fade-in duration-500">
+                        <h2 class="text-2xl md:text-3xl font-semibold text-white leading-tight mb-10 text-center">
+                            ${qData.question}
+                        </h2>
+                        <div class="grid grid-cols-1 gap-4">
+                            ${optionsHTML}
+                        </div>
+                        ${resultHTML}
+                    </div>
+                `;
+            }
+
+            return `
+                <div class="flex flex-col items-center justify-center min-h-screen p-4 md:p-8 max-w-4xl mx-auto w-full animate-in slide-in-from-bottom-8 duration-500">
+                    <div class="w-full flex items-center justify-between bg-gray-900/60 p-4 rounded-2xl mb-8 border border-white/5">
+                        <div class="flex items-center gap-4">
+                            <div class="text-left">
+                                <p class="text-xs text-gray-400 font-medium">Tema Atual</p>
+                                <h3 class="font-bold text-white text-lg truncate max-w-[200px]">${theme}</h3>
+                            </div>
+                            <div class="h-8 w-px bg-white/10 mx-2"></div>
+                            <div class="text-left">
+                                <p class="text-xs text-gray-400 font-medium">Dificuldade</p>
+                                <h3 class="font-semibold text-indigo-400">${difficulty}</h3>
+                            </div>
+                        </div>
+                        
+                        <div class="flex items-center gap-6">
+                            <div class="text-right hidden sm:block">
+                                <p class="text-xs text-gray-400 font-medium">Sequência</p>
+                                <div class="flex items-center justify-end gap-1 text-orange-400 font-bold">
+                                    <i data-lucide="flame" class="w-[16px] h-[16px]"></i> ${p.streak}
+                                </div>
+                            </div>
+                            ${Button("Sair", "window.handleQuitGame()", "secondary", "!py-2 !px-4 text-sm", false, "x-circle")}
+                        </div>
+                    </div>
+
+                    <div class="w-full mb-8">
+                        <div class="flex items-center gap-3 mb-2">
+                            <div class="bg-emerald-500/20 p-2 rounded-lg">
+                                <i data-lucide="star" class="text-emerald-400 w-5 h-5"></i>
+                            </div>
+                            <h2 class="text-xl font-bold text-white">Nível ${p.level}</h2>
+                        </div>
+                        ${XPBar(p.xp, XPEngine.getRequiredXpForLevel(p.level))}
+                    </div>
+
+                    ${GlassPanel(contentHTML, "w-full p-6 md:p-10 relative overflow-hidden")}
+                </div>
+            `;
+        };
+
+        const renderProfile = () => {
+            const p = state.player;
+            const accuracy = p.gamesPlayed > 0 ? Math.round((p.correct / p.gamesPlayed) * 100) : 0;
+
+            const StatBox = (label, value, icon, color) => `
+                <div class="bg-gray-800/50 border border-white/5 p-4 rounded-2xl flex flex-col items-center justify-center gap-2 hover:bg-gray-800/80 transition-colors">
+                    <i data-lucide="${icon}" class="${color} w-6 h-6"></i>
+                    <span class="text-2xl font-bold text-white">${value}</span>
+                    <span class="text-xs text-gray-400 font-medium uppercase tracking-wider">${label}</span>
+                </div>
+            `;
+
+            return `
+                <div class="flex flex-col min-h-screen p-6 max-w-4xl mx-auto w-full animate-in slide-in-from-left-8 duration-500">
+                    ${Button("Voltar", "window.setScreen('home')", "secondary", "self-start mb-6 !py-2", false, "chevron-right")}
+
+                    ${GlassPanel(`
+                        <div class="flex flex-col md:flex-row items-center gap-8 border-b border-white/10 pb-8 mb-8">
+                            <div class="w-32 h-32 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center shadow-[0_0_30px_rgba(99,102,241,0.4)] border-4 border-gray-900">
+                                <i data-lucide="user" class="text-white w-16 h-16"></i>
+                            </div>
+                            <div class="text-center md:text-left flex-1 w-full">
+                                <h1 class="text-4xl font-black text-white mb-2">${p.name}</h1>
+                                <div class="flex flex-wrap items-center justify-center md:justify-start gap-4 mb-4">
+                                    <span class="bg-indigo-500/20 text-indigo-300 py-1 px-3 rounded-full text-sm font-semibold border border-indigo-500/30">
+                                        Nível ${p.level}
+                                    </span>
+                                    <span class="text-gray-400 text-sm">
+                                        XP Total: <strong class="text-white">${p.totalXp}</strong>
+                                    </span>
+                                    <span class="text-gray-400 text-sm flex items-center gap-1">
+                                        <i data-lucide="clock" class="w-[14px] h-[14px]"></i> ${formatTime(p.timePlayed)}
+                                    </span>
+                                </div>
+                                ${XPBar(p.xp, XPEngine.getRequiredXpForLevel(p.level))}
+                            </div>
+                        </div>
+
+                        <h2 class="text-xl font-bold text-white mb-6 flex items-center gap-2">
+                            <i data-lucide="target" class="text-indigo-400 w-6 h-6"></i> Estatísticas de Desempenho
+                        </h2>
+
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            ${StatBox("Partidas", p.gamesPlayed, "play", "text-blue-400")}
+                            ${StatBox("Acertos", p.correct, "check-circle-2", "text-green-400")}
+                            ${StatBox("Erros", p.incorrect, "x-circle", "text-red-400")}
+                            ${StatBox("Precisão", `${accuracy}%`, "target", "text-indigo-400")}
+                            ${StatBox("Seq. Atual", p.streak, "flame", "text-orange-400")}
+                            ${StatBox("Max Seq.", p.maxStreak, "trophy", "text-yellow-400")}
+                        </div>
+                    `, "p-8 md:p-12 w-full")}
+                </div>
+            `;
+        };
+
+        const renderAchievements = () => {
+            const p = state.player;
+            const ACHIEVEMENTS_LIST = [
+                { id: 1, title: "Primeiro Passo", desc: "Jogue sua primeira partida.", req: () => p.gamesPlayed >= 1 },
+                { id: 2, title: "Aprendiz", desc: "Alcance o Nível 5.", req: () => p.level >= 5 },
+                { id: 3, title: "Mestre da Mente", desc: "Alcance o Nível 20.", req: () => p.level >= 20 },
+                { id: 4, title: "Cem Acertos", desc: "Acerte 100 perguntas.", req: () => p.correct >= 100 },
+                { id: 5, title: "Invencível", desc: "Faça uma sequência de 10 acertos.", req: () => p.maxStreak >= 10 },
+                { id: 6, title: "Precisão Cirúrgica", desc: "Alcance 50 acertos.", req: () => p.correct >= 50 },
+                { id: 7, title: "Lenda Viva", desc: "Alcance o Nível 50.", req: () => p.level >= 50 },
+            ];
+
+            const achievementsHTML = ACHIEVEMENTS_LIST.map(ach => {
+                const unlocked = ach.req();
+                return `
+                    <div class="p-4 rounded-2xl border flex items-center gap-4 transition-all ${
+                        unlocked 
+                        ? 'bg-gradient-to-r from-yellow-500/10 to-amber-500/5 border-yellow-500/30' 
+                        : 'bg-black/40 border-white/5 opacity-60 grayscale'
+                    }">
+                        <div class="p-3 rounded-full ${unlocked ? 'bg-yellow-500/20' : 'bg-gray-800'}">
+                            <i data-lucide="trophy" class="${unlocked ? 'text-yellow-400' : 'text-gray-500'} w-7 h-7"></i>
+                        </div>
+                        <div>
+                            <h3 class="font-bold ${unlocked ? 'text-white' : 'text-gray-400'}">${ach.title}</h3>
+                            <p class="text-sm text-gray-500">${ach.desc}</p>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            return `
+                <div class="flex flex-col min-h-screen p-6 max-w-4xl mx-auto w-full animate-in slide-in-from-right-8 duration-500">
+                    ${Button("Voltar", "window.setScreen('home')", "secondary", "self-start mb-6 !py-2", false, "chevron-right")}
+
+                    ${GlassPanel(`
+                        <h1 class="text-3xl font-black text-white mb-2 flex items-center gap-3">
+                            <i data-lucide="award" class="text-yellow-400 w-8 h-8"></i> Suas Conquistas
+                        </h1>
+                        <p class="text-gray-400 mb-8">Desbloqueie troféus à medida que seu conhecimento expande.</p>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            ${achievementsHTML}
+                        </div>
+                    `, "p-8 w-full")}
+                </div>
+            `;
+        };
+
+        const renderRanking = () => {
+            const data = state.ranking.data;
+            const loading = state.ranking.loading;
+
+            const getPositionIcon = (index) => {
+                if (index === 0) return "🥇";
+                if (index === 1) return "🥈";
+                if (index === 2) return "🥉";
+                return `<span class="text-gray-400 font-bold">${index + 1}</span>`;
+            };
+
+            let tableContent = '';
+            if (loading && data.length === 0) {
+                tableContent = `
+                    <tr>
+                        <td colspan="6" class="p-8 text-center text-gray-400">
+                            <div class="flex items-center justify-center gap-3">
+                                <div class="w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+                                Carregando ranking...
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            } else if (data.length === 0) {
+                tableContent = `
+                    <tr>
+                        <td colspan="6" class="p-8 text-center text-gray-500">
+                            Nenhum jogador registrado ainda. Seja o primeiro!
+                        </td>
+                    </tr>
+                `;
+            } else {
+                tableContent = data.map((row, index) => `
+                    <tr class="border-t border-white/5 hover:bg-white/5 transition-colors group">
+                        <td class="p-4 text-center text-lg">${getPositionIcon(index)}</td>
+                        <td class="p-4 font-bold text-white flex items-center gap-2">
+                           ${row.name}
+                        </td>
+                        <td class="p-4 text-indigo-400 font-black text-center">${row.score}</td>
+                        <td class="p-4 text-green-400 text-center hidden sm:table-cell">${row.correct}</td>
+                        <td class="p-4 text-red-400 text-center hidden sm:table-cell">${row.incorrect}</td>
+                        <td class="p-4 text-gray-400 text-center text-sm font-mono">${formatTime(row.time)}</td>
+                    </tr>
+                `).join('');
+            }
+
+            return `
+                <div class="flex flex-col min-h-screen p-6 max-w-5xl mx-auto w-full animate-in fade-in duration-500">
+                    <div class="flex justify-between items-center mb-6">
+                        ${Button("Voltar", "window.setScreen('home')", "secondary", "!py-2", false, "chevron-right")}
+                        ${Button("Atualizar", "window.fetchRankingData()", "secondary", "!py-2", false, "globe")}
+                    </div>
+
+                    ${GlassPanel(`
+                        <div class="text-center mb-6">
+                            <h1 class="text-3xl md:text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 to-amber-500 mb-2 flex items-center justify-center gap-3">
+                                <i data-lucide="trophy" class="text-yellow-400 w-9 h-9"></i> TOP 100 GLOBAL
+                            </h1>
+                            <p class="text-gray-400 text-sm">Os maiores mentes do Duvido Que Saiba.</p>
+                        </div>
+
+                        <div class="overflow-x-auto overflow-y-auto scrollbar-thin scrollbar-thumb-white/10 pr-2 border border-white/5 rounded-xl max-h-[60vh]">
+                            <table class="w-full text-left border-collapse min-w-[500px]">
+                                <thead class="bg-gray-900/80 sticky top-0 backdrop-blur-md z-10">
+                                    <tr>
+                                        <th class="p-4 text-gray-400 font-semibold text-sm w-16 text-center">Pos</th>
+                                        <th class="p-4 text-gray-400 font-semibold text-sm">Nome</th>
+                                        <th class="p-4 text-gray-400 font-semibold text-sm text-center">⭐ Pontos</th>
+                                        <th class="p-4 text-gray-400 font-semibold text-sm text-center hidden sm:table-cell">✅ Acertos</th>
+                                        <th class="p-4 text-gray-400 font-semibold text-sm text-center hidden sm:table-cell">❌ Erros</th>
+                                        <th class="p-4 text-gray-400 font-semibold text-sm text-center">⏱ Tempo</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${tableContent}
+                                </tbody>
+                            </table>
+                        </div>
+                    `, "p-4 md:p-8 flex flex-col flex-1")}
+                </div>
+            `;
+        };
+
+        function render() {
+            const root = document.getElementById('root');
+            
+            if (state.screen === 'home') root.innerHTML = renderHome();
+            else if (state.screen === 'game') root.innerHTML = renderGame();
+            else if (state.screen === 'profile') root.innerHTML = renderProfile();
+            else if (state.screen === 'achievements') root.innerHTML = renderAchievements();
+            else if (state.screen === 'ranking') root.innerHTML = renderRanking();
+
+            // Ativa o Lucide Icons para converter as tags <i> em SVGs preservando as classes.
+            if (window.lucide && window.lucide.createIcons) {
+                window.lucide.createIcons();
+            }
+        }
+
+        // Start App
+        render();
+
+    </script>
+</body>
+</html>
